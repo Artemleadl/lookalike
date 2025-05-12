@@ -232,6 +232,27 @@ async def main():
             
             logger.info(f'Анализирую: {chat_id}...')
             try:
+                # Проверяем кэш перед анализом
+                cached_data = analyzer.cache.get(username)
+                if cached_data:
+                    logger.info(f'Используем кэшированные данные для {username}')
+                    chat_info = cached_data['data']
+                    # Создаем базовые данные для отчета из кэша
+                    results.append({
+                        'Канал/чат': f't.me/{username}',
+                        'Название': chat_info.get('title', ''),
+                        'Описание': chat_info.get('description', ''),
+                        'Подписчиков': chat_info.get('members_count', 0),
+                        'DAU': 0,  # Эти данные не хранятся в кэше
+                        'DAU %': 0,
+                        'DAU (месяц, среднее)': 0,
+                        'DAU % (месяц, среднее)': 0,
+                        'Дней с сообщениями (30д)': 0,
+                        'Всего сообщений (24ч)': 0,
+                        'Резюме': 'Данные из кэша'
+                    })
+                    continue
+
                 chat_info = await analyzer.get_chat_info(username)
                 if not chat_info:
                     logger.warning(f'Не удалось получить информацию о чате {chat_id}')
@@ -264,6 +285,7 @@ async def main():
             else:
                 dau_percent = None
                 avg_dau_percent = None
+
             # Улучшенный анализ статуса чата
             resume = 'нет данных'
             days_with_messages = dau_month_info['days_with_messages'] if dau_month_info and 'days_with_messages' in dau_month_info else 0
@@ -292,34 +314,29 @@ async def main():
                         resume = 'Флудилка'
                     else:
                         resume = 'Живой чат'
+
             results.append({
-                'Канал/чат': chat_id,
-                'Название': chat_info['title'] if chat_info else 'Ошибка',
-                'Описание': chat_info['description'] if chat_info else 'Ошибка',
-                'Подписчиков': members_count if members_count is not None else 'нет данных',
-                'DAU': dau_info['unique_senders'] if dau_info else 'нет данных',
-                'DAU %': dau_percent if dau_percent is not None else 'нет данных',
-                'DAU (месяц, среднее)': dau_month_info['avg_dau'] if dau_month_info and dau_month_info['avg_dau'] is not None else 'нет данных',
-                'DAU % (месяц, среднее)': avg_dau_percent if avg_dau_percent is not None else 'нет данных',
+                'Канал/чат': f't.me/{username}',
+                'Название': chat_info.get('title', ''),
+                'Описание': chat_info.get('description', ''),
+                'Подписчиков': members_count,
+                'DAU': dau_info['unique_senders'] if dau_info else 0,
+                'DAU %': dau_percent if dau_percent is not None else 0,
+                'DAU (месяц, среднее)': dau_month_info['avg_dau'] if dau_month_info and 'avg_dau' in dau_month_info else 0,
+                'DAU % (месяц, среднее)': avg_dau_percent if avg_dau_percent is not None else 0,
                 'Дней с сообщениями (30д)': days_with_messages,
-                'Всего сообщений (24ч)': dau_info['total_messages'] if dau_info else 'нет данных',
+                'Всего сообщений (24ч)': dau_info['total_messages'] if dau_info else 0,
                 'Резюме': resume
             })
-    except KeyboardInterrupt:
-        logger.warning('Анализ прерван пользователем! Сохраняю промежуточные результаты...')
-        save_partial_report(results)
-        return
+
+        # Сохраняем результаты в Excel
+        save_report(results)
+        logger.info('Анализ завершен!')
     except Exception as e:
-        logger.error(f'Произошла непредвиденная ошибка: {str(e)}')
-        logger.info('Сохраняю промежуточные результаты...')
+        logger.error(f'Произошла ошибка: {str(e)}')
         save_partial_report(results)
-        return
-    
-    df = pd.DataFrame(results)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f'report_{timestamp}.xlsx'
-    df.to_excel(filename, index=False)
-    logger.info(f'Анализ завершён! Результаты сохранены в файле {filename}')
+    finally:
+        await analyzer.client.disconnect()
 
 if __name__ == '__main__':
     asyncio.run(main()) 

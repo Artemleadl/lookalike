@@ -1,9 +1,13 @@
+# Environment variables
+.env
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+env/
 build/
 develop-eggs/
 dist/
@@ -20,12 +24,16 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
-.env
-.venv
-env/
-venv/
-ENV/
+# Logs
+*.log
+
+# Cache
+chat_cache.json
+
+# Reports
+*.xlsx
+partial_report_*.xlsx
+report_*.xlsx
 
 # IDE
 .idea/
@@ -33,8 +41,16 @@ ENV/
 *.swp
 *.swo
 
-# Logs
-*.log
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual Environment
+.env
+.venv
+env/
+venv/
+ENV/
 
 # Local development
 .env.local
