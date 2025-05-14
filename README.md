@@ -19,8 +19,15 @@ pip install -r requirements.txt
 
 3. Создайте файл `.env` и добавьте в него:
 ```
-API_ID=26192350
-API_HASH=fe7769611e204d315399846c13c8bbc6
+API_ID_1=26192350
+API_HASH_1=fe7769611e204d315399846c13c8bbc6
+
+API_ID_2=28355456
+API_HASH_2=5abc8c86bf772fe864987b761289d974
+
+API_ID_3=20723031
+API_HASH_3=05f59ebab48ab890899a8aa5b4b8626d
+
 ```
 
 ## Получение API credentials
