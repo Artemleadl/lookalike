@@ -3,6 +3,11 @@ from notion_integration import NotionIntegration
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
+from evaluate_chat import evaluate_chat
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def analyze_notion_data():
     # Инициализируем интеграцию с Notion
@@ -77,6 +82,24 @@ def analyze_notion_data():
     print("\n=== Топ-10 чатов по количеству сообщений ===")
     top_messages = df.nlargest(10, 'Total Messages')[['Name', 'Total Messages', 'DAU %', 'Members Count']]
     print(top_messages.to_string(index=False))
+
+    # ML-оценка для каждого чата напрямую из Notion
+    print("\n=== ML-оценка качества чатов (Notion API) ===")
+    notion = NotionIntegration()
+    response = notion.notion.databases.query(database_id=notion.database_id)
+    for page in response.get("results", []):
+        properties = page.get("properties", {})
+        chat_id_prop = properties.get("Канал/чат", {}).get("rich_text", [])
+        chat_id = chat_id_prop[0].get("text", {}).get("content", "") if chat_id_prop else ""
+        if chat_id:
+            print(f"Выполняю ML-оценку для {chat_id}")
+            try:
+                evaluate_chat(chat_id)
+                print(f"ML-оценка для {chat_id} завершена успешно")
+                logger.info(f"ML-оценка для {chat_id} завершена успешно")
+            except Exception as e:
+                print(f"Ошибка ML-оценки для {chat_id}: {e}")
+                logger.error(f"Ошибка ML-оценки для {chat_id}: {e}")
 
 if __name__ == "__main__":
     analyze_notion_data() 

@@ -1,5 +1,6 @@
 from notion_integration import NotionIntegration
 import logging
+from evaluate_chat import evaluate_chat
 
 # Настройка логирования
 logging.basicConfig(
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def update_chat_metrics(chat_id: str, metrics: dict):
     """
-    Обновляет метрики чата в Notion
+    Обновляет метрики чата в Notion и запускает оценку качества
     """
     notion = NotionIntegration()
     
@@ -50,6 +51,11 @@ def update_chat_metrics(chat_id: str, metrics: dict):
             properties=properties
         )
         logger.info(f"Метрики для чата {chat_id} успешно обновлены")
+        
+        # Запускаем оценку качества
+        logger.info(f"Запускаю оценку качества для чата {chat_id}")
+        evaluate_chat(chat_id)
+        
         return True
     except Exception as e:
         logger.error(f"Ошибка при обновлении метрик для чата {chat_id}: {str(e)}")

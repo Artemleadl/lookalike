@@ -16,6 +16,8 @@ from proxy_pool import ProxyPool
 from proxies import PROXIES
 import glob
 import subprocess
+from notion_integration import NotionIntegration
+from evaluate_chat import evaluate_chat
 
 # Настройка логирования
 logging.basicConfig(
@@ -30,6 +32,13 @@ logger = logging.getLogger(__name__)
 
 # Загрузка переменных окружения
 load_dotenv(dotenv_path='.env')
+
+# Глобальная переменная для хранения результатов анализа
+results = []
+# Счётчик для контроля общего количества анализов за сессию
+analyzed_chats_total = 0
+MAX_CHATS_BEFORE_PAUSE = 250
+PAUSE_SECONDS = 600  # 10 минут
 
 class Cache:
     def __init__(self, cache_file='chat_cache.json'):
@@ -83,10 +92,12 @@ class TelegramAnalyzer:
         self.rate_limit = 30  # запросов в секунду
         self.last_request_time = {}
         self.floodwait_until = [0] * len(self.accounts)  # timestamp до которого аккаунт "заморожен"
+        self.notion = NotionIntegration()
 
     async def start(self):
         await self._init_clients()
         logger.info(f"Бот запущен и готов к работе! Всего аккаунтов: {len(self.accounts)}")
+        print("Бот слушает команды...")
 
     async def _init_clients(self):
         for idx, account in enumerate(self.accounts):
@@ -108,9 +119,8 @@ class TelegramAnalyzer:
             self.clients.append(client)
             logger.info(f"Клиент {account['session']} (api_id={account['api_id']}) успешно инициализирован")
 
-    def get_next_client(self):
+    async def get_next_client(self):
         import time
-        start_idx = self.current_client_index
         now = time.time()
         for _ in range(len(self.clients)):
             idx = self.current_client_index
@@ -125,10 +135,9 @@ class TelegramAnalyzer:
         min_wait = min(self.floodwait_until) - now
         logger.warning(f"Все аккаунты в FloodWait. Жду {int(min_wait)} секунд...")
         if min_wait > 0:
-            import asyncio
-            asyncio.get_event_loop().run_until_complete(asyncio.sleep(min_wait))
+            await asyncio.sleep(min_wait)
         # После ожидания пробуем снова
-        return self.get_next_client()
+        return await self.get_next_client()
 
     async def restart_with_new_ip(self):
         """Переподключение всех клиентов с новыми IP"""
@@ -150,11 +159,13 @@ class TelegramAnalyzer:
         import time
         try:
             cached_data = self.cache.get(chat_id)
-            if cached_data:
+            if cached_data and 'data' in cached_data:
                 logger.info(f"Используем кэшированные данные для {chat_id}")
                 return cached_data['data']
+            else:
+                logger.info(f"Кэш для {chat_id} не содержит 'data', игнорируем кэш.")
             await asyncio.sleep(10)
-            client, idx = self.get_next_client()
+            client, idx = await self.get_next_client()
             chat = await client.get_entity(chat_id)
             if isinstance(chat, Channel):
                 await asyncio.sleep(5)
@@ -182,7 +193,7 @@ class TelegramAnalyzer:
     async def analyze_dau(self, chat_id, hours=24):
         import time
         try:
-            client, idx = self.get_next_client()
+            client, idx = await self.get_next_client()
             messages = []
             async for message in client.iter_messages(chat_id, limit=100):
                 if message.date > datetime.now(timezone.utc) - timedelta(hours=hours):
@@ -211,7 +222,7 @@ class TelegramAnalyzer:
     async def analyze_dau_monthly(self, chat_id, days=30):
         import time
         try:
-            client, idx = self.get_next_client()
+            client, idx = await self.get_next_client()
             from collections import defaultdict
             messages_by_day = defaultdict(set)
             days_with_messages = set()
@@ -327,194 +338,128 @@ def save_last_24h_results(results):
     except Exception as e:
         logger.error(f'Ошибка при сохранении результатов: {e}')
 
+def get_resume(members, avg_dau, avg_dau_percent, days_with_messages, days_in_month=30):
+    if members is None or pd.isna(members):
+        return 'нет данных'
+    try:
+        members = float(members)
+    except:
+        return 'нет данных'
+    if members >= 1000:
+        if (avg_dau is not None and avg_dau < 5 and avg_dau_percent is not None and avg_dau_percent < 0.1) or (days_with_messages is not None and days_with_messages < days_in_month * 0.3):
+            return 'Мертвый чат'
+        elif avg_dau_percent is not None and avg_dau_percent > 10:
+            return 'Флудилка'
+        else:
+            return 'Живой чат'
+    elif members >= 100:
+        if (avg_dau is not None and avg_dau < 1 and avg_dau_percent is not None and avg_dau_percent < 0.1) or (days_with_messages is not None and days_with_messages < days_in_month * 0.3):
+            return 'Мертвый чат'
+        elif avg_dau_percent is not None and avg_dau_percent > 15:
+            return 'Флудилка'
+        elif avg_dau is not None and avg_dau >= 1:
+            return 'Живой чат (нишевой/объявлений)'
+        else:
+            return 'Живой чат'
+    else:
+        if avg_dau is not None and avg_dau < 1 or (days_with_messages is not None and days_with_messages < days_in_month * 0.3):
+            return 'Мертвый чат'
+        elif avg_dau_percent is not None and avg_dau_percent > 20:
+            return 'Флудилка'
+        else:
+            return 'Живой чат'
+
 async def main():
-    import os
-    print('--- ПРОВЕРКА .env ---')
-    print('Файл .env существует:', os.path.exists('.env'))
-    if os.path.exists('.env'):
-        with open('.env', 'r', encoding='utf-8') as f:
-            print('Содержимое .env:')
-            print(f.read())
-    print('--- ВСЕ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ, которые видит Python ---')
-    for k, v in os.environ.items():
-        if 'API' in k or 'HASH' in k:
-            print(f'{k}={v}')
-    print('--- КОНЕЦ ПРОВЕРКИ ---')
-    print('API_ID_1:', os.getenv('API_ID_1'))
-    print('API_HASH_1:', os.getenv('API_HASH_1'))
-    print('API_ID_2:', os.getenv('API_ID_2'))
-    print('API_HASH_2:', os.getenv('API_HASH_2'))
-    print('API_ID_3:', os.getenv('API_ID_3'))
-    print('API_HASH_3:', os.getenv('API_HASH_3'))
     analyzer = TelegramAnalyzer()
     await analyzer.start()
     
-    # Список чатов для анализа (задано пользователем)
-    chat_ids = [
-        '@WebDevelRu',
-        '@vosh2021_otveti',
-        '@vopros_traf',
-        '@virtualliteracy01',
-        '@vidchat',
-        '@verbalkinks',
-        '@Uchitelya_shcoli2',
-        '@uc1_1C',
-        '@u4ebnik',
-        '@typ_math_chat',
-        '@tusxfiles',
-        '@tulahack',
-        '@TRKI3C1',
-    ]
-    logger.info(f'Будет проанализировано {len(chat_ids)} чатов.')
-    
-    def is_valid_username(username):
-        return bool(username) and username != '' and username != ' ' and username != 'https://t.me/'
-
-    CHUNK_SIZE = 5
-    chat_chunks = [chat_ids[i:i + CHUNK_SIZE] for i in range(0, len(chat_ids), CHUNK_SIZE)]
-    
-    results = []
     try:
-        for chunk_index, chunk in enumerate(chat_chunks):
-            logger.info(f'Обрабатываю группу {chunk_index + 1} из {len(chat_chunks)}')
-            
-            for chat_id in chunk:
-                username = extract_username(chat_id)
-                if not is_valid_username(username):
-                    logger.warning(f'Пропускаю некорректную ссылку: {chat_id}')
-                    continue
+        # Получаем список чатов для анализа из Notion
+        try:
+            chats_to_analyze = analyzer.notion.get_chats_to_analyze()
+            logger.info(f"Чатов для анализа найдено: {len(chats_to_analyze)}")
+        except Exception as e:
+            logger.error(f"Ошибка при получении чатов из Notion: {e}")
+            chats_to_analyze = []
+        
+        for chat_page in chats_to_analyze:
+            # Безопасное извлечение chat_id с проверкой на пустой список
+            chat_properties = chat_page.get("properties", {})
+            chat_id_property = chat_properties.get("Канал/чат", {})
+            rich_text = chat_id_property.get("rich_text", [])
+            chat_id = rich_text[0].get("text", {}).get("content", "") if rich_text else ""
+            if not chat_id:
+                continue
                 
-                # Логируем аккаунт, который будет использоваться для анализа
-                account_idx = analyzer.current_client_index
-                account = analyzer.accounts[account_idx]
-                logger.info(f'Анализирую: {chat_id} аккаунтом {account["session"]} (api_id={account["api_id"]})...')
-                try:
-                    cached_data = analyzer.cache.get(username)
-                    if cached_data:
-                        logger.info(f'Используем кэшированные данные для {username}')
-                        chat_info = cached_data.get('chat_info', {})
-                        dau_info = cached_data.get('dau_info', {})
-                        dau_month_info = cached_data.get('dau_month_info', {})
-                        cached_at = cached_data.get('cached_at', 'неизвестно')
-                    else:
-                        chat_info = await analyzer.get_chat_info(username)
-                        if not chat_info:
-                            logger.warning(f'Не удалось получить информацию о чате {chat_id}')
-                            continue
-                        dau_info = await analyzer.analyze_dau(username)
-                        dau_month_info = await analyzer.analyze_dau_monthly(username)
-                        cached_at = datetime.now().isoformat()
-                        analyzer.cache.set(username, {
-                            'chat_info': chat_info,
-                            'dau_info': dau_info,
-                            'dau_month_info': dau_month_info,
-                            'cached_at': cached_at
-                        })
-                        pause_time = random.uniform(15, 30)
-                        logger.info(f'Делаю паузу на {pause_time:.1f} секунд...')
-                        await asyncio.sleep(pause_time)
-                except FloodWaitError as e:
-                    logger.error(f'Обнаружено ограничение Telegram: необходимо подождать {e.seconds} секунд')
-                    logger.info('Сохраняю промежуточные результаты и завершаю анализ.')
-                    save_partial_report(results)
-                    sys.exit(0)
-                except (ChatAdminRequiredError, ChannelPrivateError) as e:
-                    logger.error(f'Нет доступа к чату {chat_id}: {str(e)}')
-                    continue
-                except Exception as e:
-                    logger.error(f"Произошла ошибка: {e}")
-                    save_partial_report(results)
-                    break
+            logger.info(f"Начинаем анализ чата {chat_id}")
+            
+            # Получаем информацию о чате
+            chat_info = await analyzer.get_chat_info(chat_id)
+            if not chat_info:
+                continue
+                
+            # Анализируем DAU
+            dau_info = await analyzer.analyze_dau(chat_id)
+            monthly_dau = await analyzer.analyze_dau_monthly(chat_id)
+            
+            # Формируем результаты анализа для всех полей
+            members_count = chat_info.get("members_count", 0)
+            dau = dau_info.get("unique_senders", 0) if dau_info else 0
+            dau_percent = round((dau / members_count * 100), 2) if members_count and dau is not None else 0
+            monthly_avg_dau = monthly_dau.get("avg_dau", 0) if monthly_dau else 0
+            monthly_avg_dau_percent = round((monthly_avg_dau / members_count * 100), 2) if members_count and monthly_avg_dau is not None else 0
+            days_with_messages = monthly_dau.get("days_with_messages", 0) if monthly_dau else 0
+            total_messages = dau_info.get("total_messages", 0) if dau_info else 0
+            resume = get_resume(members_count, monthly_avg_dau, monthly_avg_dau_percent, days_with_messages)
+            cache_date = datetime.now().isoformat()
+            account_used = chat_info.get("account_used", "")
+            description = chat_info.get("description", "")
+            name = chat_info.get("title", "")
 
-                members_count = chat_info.get('members_count') if chat_info else None
-                if members_count:
-                    dau_percent = round((dau_info.get('unique_senders', 0) / members_count * 100), 2) if dau_info else None
-                    avg_dau_percent = round((dau_month_info.get('avg_dau', 0) / members_count * 100), 2) if dau_month_info and dau_month_info.get('avg_dau') and members_count else None
-                else:
-                    dau_percent = None
-                    avg_dau_percent = None
-
-                resume = 'нет данных'
-                days_with_messages = dau_month_info.get('days_with_messages', 0) if dau_month_info else 0
-                days_in_month = 30
-                if members_count and dau_month_info and dau_month_info.get('avg_dau') is not None and avg_dau_percent is not None:
-                    if members_count >= 1000:
-                        if (dau_month_info.get('avg_dau', 0) < 5 and avg_dau_percent < 0.1) or days_with_messages < days_in_month * 0.3:
-                            resume = 'Мертвый чат'
-                        elif avg_dau_percent > 10:
-                            resume = 'Флудилка'
-                        else:
-                            resume = 'Живой чат'
-                    elif members_count >= 100:
-                        if (dau_month_info.get('avg_dau', 0) < 1 and avg_dau_percent < 0.1) or days_with_messages < days_in_month * 0.3:
-                            resume = 'Мертвый чат'
-                        elif avg_dau_percent > 15:
-                            resume = 'Флудилка'
-                        elif dau_month_info.get('avg_dau', 0) >= 1:
-                            resume = 'Живой чат (нишевой/объявлений)'
-                        else:
-                            resume = 'Живой чат'
-                    else:
-                        if dau_month_info.get('avg_dau', 0) < 1 or days_with_messages < days_in_month * 0.3:
-                            resume = 'Мертвый чат'
-                        elif avg_dau_percent > 20:
-                            resume = 'Флудилка'
-                        else:
-                            resume = 'Живой чат'
-
-                results.append({
-                    'Канал/чат': f't.me/{username}',
-                    'Название': chat_info.get('title', ''),
-                    'Описание': chat_info.get('description', ''),
-                    'Подписчиков': members_count,
-                    'DAU': dau_info.get('unique_senders', 0) if dau_info else 0,
-                    'DAU %': dau_percent if dau_percent is not None else 0,
-                    'DAU (месяц, среднее)': dau_month_info.get('avg_dau', 0) if dau_month_info else 0,
-                    'DAU % (месяц, среднее)': avg_dau_percent if avg_dau_percent is not None else 0,
-                    'Дней с сообщениями (30д)': days_with_messages,
-                    'Всего сообщений (24ч)': dau_info.get('total_messages', 0) if dau_info else 0,
-                    'Резюме': resume,
-                    'Дата кэша': cached_at,
-                    'Аккаунт': chat_info.get('account_used', 'неизвестно')
-                })
-
-            # После каждой группы — переподключение для смены IP
-            await analyzer.restart_with_new_ip()
-            logger.info(f'IP успешно сменён после группы {chunk_index + 1}')
-            # Пауза между группами
-            if chunk_index < len(chat_chunks) - 1:
-                group_pause = random.uniform(60, 90)  # 60-90 секунд между группами
-                logger.info(f'Завершена группа {chunk_index + 1}. Пауза {group_pause:.1f} секунд перед следующей группой...')
-                await asyncio.sleep(group_pause)
-
-        # Сохраняем результаты в Excel
-        save_report(results)
-        logger.info('Анализ завершен!')
+            analysis_results = {
+                "chat_id": chat_id,
+                "name": name,
+                "description": description,
+                "members_count": members_count,
+                "dau": dau,
+                "dau_percent": dau_percent,
+                "monthly_avg_dau": monthly_avg_dau,
+                "monthly_avg_dau_percent": monthly_avg_dau_percent,
+                "days_with_messages": days_with_messages,
+                "total_messages": total_messages,
+                "resume": resume,
+                "cache_date": cache_date,
+                "account": account_used,
+                "activity_score": monthly_avg_dau_percent,
+                "notes": f"DAU за 24 часа: {dau}\n"
+                        f"DAU за месяц: {monthly_avg_dau}\n"
+                        f"Процент DAU: {monthly_avg_dau_percent}%"
+            }
+            
+            # Обновляем страницу в Notion
+            analyzer.notion.update_chat_analysis(chat_page["id"], analysis_results)
+            
+            # ML-оценка
+            try:
+                print(f"Выполняю ML-оценку для {chat_id}")
+                evaluate_chat(chat_id)
+                print(f"ML-оценка для {chat_id} завершена успешно")
+            except Exception as e:
+                print(f"Ошибка ML-оценки для {chat_id}: {e}")
+            
+            # Делаем паузу между анализами
+            await asyncio.sleep(random.uniform(5, 10))
+            
     except Exception as e:
-        logger.error(f'Произошла ошибка: {str(e)}')
-        save_partial_report(results)
+        logger.error(f"Произошла ошибка: {e}")
     finally:
+        # Экспортируем результаты в Excel
+        analyzer.notion.export_to_excel(f"notion_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
+        
+        # Закрываем все клиенты
         for client in analyzer.clients:
             await client.disconnect()
 
-    # Добавляем проверку авторизации для всех клиентов
-    for idx, client in enumerate(analyzer.clients):
-        is_auth = await client.is_user_authorized()
-        if is_auth:
-            me = await client.get_me()
-            print(f"Аккаунт {analyzer.accounts[idx]['session']} авторизован: {is_auth}, user_id: {me.id}, username: @{me.username}, имя: {me.first_name} {me.last_name}")
-        else:
-            print(f"Аккаунт {analyzer.accounts[idx]['session']} авторизован: {is_auth}")
-
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Программа прервана пользователем")
-        # Сохраняем результаты за последние 24 часа
-        save_last_24h_results(results)
-    except Exception as e:
-        logger.error(f"Произошла ошибка: {e}")
-        # Сохраняем результаты за последние 24 часа
-        save_last_24h_results(results) 
+if __name__ == "__main__":
+    asyncio.run(main()) 
     
