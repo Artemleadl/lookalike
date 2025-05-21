@@ -183,7 +183,7 @@ class TelegramAnalyzer:
                 return result
         except FloodWaitError as e:
             wait_time = e.seconds
-            logger.warning(f"FloodWait: аккаунт {self.accounts[self.current_client_index-1]['session']} заморожен на {wait_time} секунд")
+            logger.warning(f"FloodWait: аккаунт {self.accounts[self.current_client_index-1]['session']} заморожен на {wait_time} секунд (чат {chat_id})")
             self.floodwait_until[self.current_client_index-1] = time.time() + wait_time
             return await self.get_chat_info(chat_id)
         except Exception as e:
@@ -374,30 +374,34 @@ async def main():
     await analyzer.start()
     
     try:
-        # Получаем список чатов для анализа из Notion
+        # Получаем все чаты для анализа с пагинацией
         try:
-            chats_to_analyze = analyzer.notion.get_chats_to_analyze()
-            logger.info(f"Чатов для анализа найдено: {len(chats_to_analyze)}")
+            chats_to_analyze = analyzer.notion.get_all_chats_with_pagination()
+            logger.info(f"[DEBUG] Всего чатов для анализа (с пагинацией): {len(chats_to_analyze)}")
         except Exception as e:
             logger.error(f"Ошибка при получении чатов из Notion: {e}")
             chats_to_analyze = []
         
+        print(f"Готов к анализу чатов, всего в очереди: {len(chats_to_analyze)}")
+        logger.info(f"Готов к анализу чатов, всего в очереди: {len(chats_to_analyze)}")
+        
         for chat_page in chats_to_analyze:
-            # Безопасное извлечение chat_id с проверкой на пустой список
             chat_properties = chat_page.get("properties", {})
             chat_id_property = chat_properties.get("Канал/чат", {})
             rich_text = chat_id_property.get("rich_text", [])
             chat_id = rich_text[0].get("text", {}).get("content", "") if rich_text else ""
             if not chat_id:
+                logger.warning("[DEBUG] Пропущен чат без chat_id")
                 continue
-                
-            logger.info(f"Начинаем анализ чата {chat_id}")
+            logger.info(f"[DEBUG] Начинаю анализ чата {chat_id}")
+            print(f"[DEBUG] Анализирую чат: {chat_id}")
             
             # Получаем информацию о чате
             chat_info = await analyzer.get_chat_info(chat_id)
             if not chat_info:
+                logger.warning(f"[DEBUG] Не удалось получить info для {chat_id}")
                 continue
-                
+            
             # Анализируем DAU
             dau_info = await analyzer.analyze_dau(chat_id)
             monthly_dau = await analyzer.analyze_dau_monthly(chat_id)
@@ -438,18 +442,21 @@ async def main():
             
             # Обновляем страницу в Notion
             analyzer.notion.update_chat_analysis(chat_page["id"], analysis_results)
+            logger.info(f"[DEBUG] Метрики для {chat_id} обновлены в Notion")
             
             # ML-оценка
             try:
                 print(f"Выполняю ML-оценку для {chat_id}")
                 evaluate_chat(chat_id)
                 print(f"ML-оценка для {chat_id} завершена успешно")
+                logger.info(f"ML-оценка для {chat_id} завершена успешно")
             except Exception as e:
                 print(f"Ошибка ML-оценки для {chat_id}: {e}")
+                logger.error(f"Ошибка ML-оценки для {chat_id}: {e}")
             
             # Делаем паузу между анализами
             await asyncio.sleep(random.uniform(5, 10))
-            
+    
     except Exception as e:
         logger.error(f"Произошла ошибка: {e}")
     finally:

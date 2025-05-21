@@ -173,6 +173,24 @@ class NotionIntegration:
         
         return None
 
+    def get_all_chats_with_pagination(self):
+        """
+        Получает все чаты из базы Notion с поддержкой пагинации
+        """
+        all_results = []
+        next_cursor = None
+        while True:
+            kwargs = {"database_id": self.database_id}
+            if next_cursor:
+                kwargs["start_cursor"] = next_cursor
+            response = self.notion.databases.query(**kwargs)
+            all_results.extend(response.get("results", []))
+            if response.get("has_more"):
+                next_cursor = response.get("next_cursor")
+            else:
+                break
+        return all_results
+
 def get_analyzed_chats():
     notion = NotionIntegration()
     response = notion.notion.databases.query(
