@@ -374,10 +374,10 @@ async def main():
     await analyzer.start()
     
     try:
-        # Получаем все чаты для анализа с пагинацией
+        # Получаем только чаты со статусом 'To Analyze' с пагинацией
         try:
-            chats_to_analyze = analyzer.notion.get_all_chats_with_pagination()
-            logger.info(f"[DEBUG] Всего чатов для анализа (с пагинацией): {len(chats_to_analyze)}")
+            chats_to_analyze = analyzer.notion.get_chats_to_analyze_with_pagination()
+            logger.info(f"[DEBUG] Всего чатов для анализа (To Analyze, с пагинацией): {len(chats_to_analyze)}")
         except Exception as e:
             logger.error(f"Ошибка при получении чатов из Notion: {e}")
             chats_to_analyze = []
