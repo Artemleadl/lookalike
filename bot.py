@@ -183,7 +183,7 @@ class TelegramAnalyzer:
                 return result
         except FloodWaitError as e:
             wait_time = e.seconds
-            logger.warning(f"FloodWait: аккаунт {self.accounts[self.current_client_index-1]['session']} заморожен на {wait_time} секунд (чат {chat_id})")
+            logger.warning(f"⚠️ FloodWait: аккаунт {self.accounts[self.current_client_index-1]['session']} заморожен на {wait_time} секунд (чат {chat_id})")
             self.floodwait_until[self.current_client_index-1] = time.time() + wait_time
             return await self.get_chat_info(chat_id)
         except Exception as e:
@@ -212,7 +212,7 @@ class TelegramAnalyzer:
             }
         except FloodWaitError as e:
             wait_time = e.seconds
-            logger.warning(f"FloodWait: аккаунт {self.accounts[self.current_client_index-1]['session']} заморожен на {wait_time} секунд")
+            logger.warning(f"⚠️ FloodWait: аккаунт {self.accounts[self.current_client_index-1]['session']} заморожен на {wait_time} секунд")
             self.floodwait_until[self.current_client_index-1] = time.time() + wait_time
             return await self.analyze_dau(chat_id, hours)
         except Exception as e:
@@ -246,7 +246,7 @@ class TelegramAnalyzer:
             }
         except FloodWaitError as e:
             wait_time = e.seconds
-            logger.warning(f"FloodWait: аккаунт {self.accounts[self.current_client_index-1]['session']} заморожен на {wait_time} секунд")
+            logger.warning(f"⚠️ FloodWait: аккаунт {self.accounts[self.current_client_index-1]['session']} заморожен на {wait_time} секунд")
             self.floodwait_until[self.current_client_index-1] = time.time() + wait_time
             return await self.analyze_dau_monthly(chat_id, days)
         except Exception as e:
