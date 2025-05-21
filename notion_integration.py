@@ -50,14 +50,14 @@ class NotionIntegration:
         )
         return response.get("results", [])
 
-    def update_chat_analysis(self, page_id: str, analysis_results: Dict[str, Any]):
+    def update_chat_analysis(self, page_id: str, analysis_results: Dict[str, Any], status: str = "Analyzed"):
         """
-        Обновляет страницу в Notion с результатами анализа
+        Обновляет страницу в Notion с результатами анализа и статусом
         """
         self.notion.pages.update(
             page_id=page_id,
             properties={
-                "Status": {"select": {"name": "Analyzed"}},
+                "Status": {"select": {"name": status}},
                 "Канал/чат": {"rich_text": [{"text": {"content": analysis_results.get("chat_id", "")}}]},
                 "Название": {"title": [{"text": {"content": analysis_results.get("name", "")}}]},
                 "Описание": {"rich_text": [{"text": {"content": analysis_results.get("description", "")}}]},

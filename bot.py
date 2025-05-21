@@ -399,12 +399,17 @@ async def main():
             # Получаем информацию о чате
             chat_info = await analyzer.get_chat_info(chat_id)
             if not chat_info:
-                logger.warning(f"[DEBUG] Не удалось получить info для {chat_id}")
+                logger.warning(f"Ошибка анализа чата {chat_id}, устанавливаю статус Error в Notion")
+                analyzer.notion.update_chat_analysis(chat_page["id"], {"chat_id": chat_id, "name": chat_info.get('title', '')}, status="Error")
                 continue
             
             # Анализируем DAU
             dau_info = await analyzer.analyze_dau(chat_id)
             monthly_dau = await analyzer.analyze_dau_monthly(chat_id)
+            if not dau_info or not monthly_dau:
+                logger.warning(f"Ошибка анализа DAU для чата {chat_id}, устанавливаю статус Error в Notion")
+                analyzer.notion.update_chat_analysis(chat_page["id"], {"chat_id": chat_id, "name": chat_info.get('title', '')}, status="Error")
+                continue
             
             # Формируем результаты анализа для всех полей
             members_count = chat_info.get("members_count", 0)
