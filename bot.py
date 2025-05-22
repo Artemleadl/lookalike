@@ -392,13 +392,13 @@ async def main():
             chat_id = rich_text[0].get("text", {}).get("content", "") if rich_text else ""
             if not chat_id:
                 logger.warning("[DEBUG] Пропущен чат без chat_id")
-                continue
+                    continue
             logger.info(f"[DEBUG] Начинаю анализ чата {chat_id}")
             print(f"[DEBUG] Анализирую чат: {chat_id}")
             
             # Получаем информацию о чате
             chat_info = await analyzer.get_chat_info(chat_id)
-            if not chat_info:
+                        if not chat_info:
                 logger.warning(f"Ошибка анализа чата {chat_id}, устанавливаю статус Error в Notion")
                 error_results = {"chat_id": chat_id, "name": ""}
                 logger.warning(f"Передаю в update_chat_analysis: {error_results}")
@@ -413,7 +413,7 @@ async def main():
                 error_results = {"chat_id": chat_id, "name": chat_info.get('title', '') if chat_info else ""}
                 logger.warning(f"Передаю в update_chat_analysis: {error_results}")
                 analyzer.notion.update_chat_analysis(chat_page["id"], error_results, status="Error")
-                continue
+                            continue
             
             # Формируем результаты анализа для всех полей
             members_count = chat_info.get("members_count", 0)
@@ -459,7 +459,7 @@ async def main():
                 evaluate_chat(chat_id)
                 print(f"ML-оценка для {chat_id} завершена успешно")
                 logger.info(f"ML-оценка для {chat_id} завершена успешно")
-            except Exception as e:
+                except Exception as e:
                 print(f"Ошибка ML-оценки для {chat_id}: {e}")
                 logger.error(f"Ошибка ML-оценки для {chat_id}: {e}")
             
@@ -477,5 +477,5 @@ async def main():
             await client.disconnect()
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+        asyncio.run(main())
     
