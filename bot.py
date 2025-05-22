@@ -400,7 +400,9 @@ async def main():
             chat_info = await analyzer.get_chat_info(chat_id)
             if not chat_info:
                 logger.warning(f"Ошибка анализа чата {chat_id}, устанавливаю статус Error в Notion")
-                analyzer.notion.update_chat_analysis(chat_page["id"], {"chat_id": chat_id, "name": chat_info.get('title', '')}, status="Error")
+                error_results = {"chat_id": chat_id, "name": ""}
+                logger.warning(f"Передаю в update_chat_analysis: {error_results}")
+                analyzer.notion.update_chat_analysis(chat_page["id"], error_results, status="Error")
                 continue
             
             # Анализируем DAU
@@ -408,7 +410,9 @@ async def main():
             monthly_dau = await analyzer.analyze_dau_monthly(chat_id)
             if not dau_info or not monthly_dau:
                 logger.warning(f"Ошибка анализа DAU для чата {chat_id}, устанавливаю статус Error в Notion")
-                analyzer.notion.update_chat_analysis(chat_page["id"], {"chat_id": chat_id, "name": chat_info.get('title', '')}, status="Error")
+                error_results = {"chat_id": chat_id, "name": chat_info.get('title', '') if chat_info else ""}
+                logger.warning(f"Передаю в update_chat_analysis: {error_results}")
+                analyzer.notion.update_chat_analysis(chat_page["id"], error_results, status="Error")
                 continue
             
             # Формируем результаты анализа для всех полей

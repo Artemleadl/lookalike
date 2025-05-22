@@ -69,7 +69,6 @@ class NotionIntegration:
                 "Дней с сообщениями (30д)": {"number": analysis_results.get("days_with_messages", 0)},
                 "Всего сообщений (24ч)": {"number": analysis_results.get("total_messages", 0)},
                 "Резюме": {"rich_text": [{"text": {"content": analysis_results.get("resume", "")}}]},
-                "Дата кэша": {"date": {"start": analysis_results.get("cache_date", "")}},
                 "Аккаунт": {"rich_text": [{"text": {"content": analysis_results.get("account", "")}}]},
                 "Activity Score": {"number": analysis_results.get("activity_score", 0)},
                 "Last Analysis": {"date": {"start": pd.Timestamp.now().isoformat()}},
